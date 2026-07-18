@@ -46,3 +46,98 @@ jobs:
 
       - name: Lint
         run: clojure -M:lint
+
+  # 2026-07-18 addendum to Decision 4 (docs/adr/0001-architecture.md) — real
+  # WebGPU render verification. macOS runner: ADR-2607078000 Addendum 8
+  # found Linux/SwiftShader WebGPU unreliable (blank canvases,
+  # popErrorScope errors), macOS reliable (real Metal-backed GPU process,
+  # no special launch flags needed) — same finding kami-app-amenominaka's
+  # own webgpu-smoke job relies on.
+  webgpu-smoke:
+    name: real-browser WebGPU render verification
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: kami-app-hygaccess-plant}
+
+      # kotoba-lang/webgpu itself, plus its own ~20 :local/root siblings
+      # (deps.edn's :cljs alias comment has the full account of why each is
+      # here). actions/checkout forbids `path:` escaping $GITHUB_WORKSPACE
+      # via `../`, so every repo checks out as a DIRECT CHILD of
+      # $GITHUB_WORKSPACE — matching the sibling layout deps.edn's
+      # :local/root ("../webgpu" etc., relative to THIS repo's own checkout)
+      # needs, since $GITHUB_WORKSPACE/kami-app-hygaccess-plant/../webgpu ==
+      # $GITHUB_WORKSPACE/webgpu.
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/webgpu, path: webgpu}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/org-w3-webgpu, path: org-w3-webgpu}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/wgsl, path: wgsl}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/expr, path: expr}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/sprite-gpu, path: sprite-gpu}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/sprite2d, path: sprite2d}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/sky, path: sky}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/shaders, path: shaders}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/render, path: render}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/render-shaders, path: render-shaders}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/scene2d, path: scene2d}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/gpu, path: gpu}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/webgl, path: webgl}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/dance, path: dance}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/physics, path: physics}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/fsm, path: fsm}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/netsync, path: netsync}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/pipelines, path: pipelines}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/level, path: level}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/host, path: host}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/playwright, path: playwright}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/cartpole-math, path: cartpole-math}
+      # host's own further :local/root deps (deps.edn :cljs alias comment).
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/kami-engine-sdk, path: kami-engine-sdk}
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/physics-2d, path: physics-2d}
+
+      - uses: DeLaGuardo/setup-clojure@13.1
+        with:
+          cli: latest
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+        working-directory: kami-app-hygaccess-plant
+      - run: npx playwright install chromium
+        working-directory: kami-app-hygaccess-plant
+      - run: npx shadow-cljs compile render-demo
+        working-directory: kami-app-hygaccess-plant
+      - run: npx nbb -cp test/render test/render/verify_render.cljs
+        working-directory: kami-app-hygaccess-plant
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-screenshot
+          path: kami-app-hygaccess-plant/test/render/render-screenshot.png
+          if-no-files-found: ignore

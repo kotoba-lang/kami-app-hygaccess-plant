@@ -116,25 +116,66 @@ mesh-topology and license decisions). Namespace map:
 
 ## Render status (honest accounting — read before assuming this "renders")
 
-- **Proven / tested**: the render-IR construction itself
+**Verified real WebGPU rendering, 2026-07-18** (see
+`docs/adr/0001-architecture.md` Decision 4 addendum for the full account).
+The earlier "wired but unverified" note below turned out to be a
+**workspace-layout gap, not a real bug**: `kotoba-lang/webgpu` genuinely does
+not resolve from a lone standalone clone (confirmed, see the error transcript
+kept below for the record), but it resolves and **runs correctly** once
+checked out as a sibling inside the west-managed `kotoba-lang` workspace
+(`orgs/kotoba-lang/*`) alongside its ~20 own `:local/root` deps — exactly the
+layout `west update` produces and exactly the pattern
+`kotoba-lang/kami-app-amenominaka` already established as a real, CI-green
+precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
+
+- **Proven / tested (JVM, portable)**: the render-IR construction itself
   (`kami-app-hygaccess-plant.render`) — `render-ir`, `instance`, `sky`,
   `valid?`, `concentration->color`, and `tank-render-ir` (one instance per
   finite-volume cell, colour-mapped by normalized concentration). These are
   pure `.cljc` functions with JVM tests (`render_test.cljc`) proving the
   output is well-formed (`valid?`) and deterministic — no browser, no WebGPU
-  context needed for that proof.
-- **Wired but unverified**: actually calling `kami.webgpu/init!` + `draw!`
-  (or the WebGL 2.0 fallback it selects automatically) on the render-IR this
-  repo produces, to get pixels on screen. This repo's render-IR is
-  **structurally identical** to `kami.webgpu.ir`'s documented shape
-  (`{:globals {:sky {...} :eye [...] :target [...]} :instances [{:pos :color
-  :size :yaw} ...]}`), so wiring it through is expected to be a direct
-  `(gpu/draw! ctx (render/tank-render-ir result))` call from inside a browser
-  build — but that call has not actually been exercised on screen.
-- **Known, confirmed gap — not declared as a hard dependency, and why**:
-  `kotoba-lang/webgpu` is NOT in this repo's `deps.edn`. Empirically confirmed
-  (`clojure -Stree` against a standalone `deps.edn` referencing
-  `io.github.kotoba-lang/webgpu` by git SHA):
+  context needed for that proof. Unaffected by anything below — `clojure
+  -M:test` still resolves standalone (22 tests / 63 assertions green, no
+  sibling checkouts needed) and still does not declare
+  `io.github.kotoba-lang/webgpu` in its base `:deps`.
+- **Proven / tested (real browser)**: `kami.webgpu/init!` + `draw!` actually
+  drawing this repo's real render-IR — not a fixture, the **exact same**
+  `cae.solver/solve :hygaccess-mixing-tank` result the JVM tests exercise —
+  in a full headless Chromium on macOS (real Metal-backed GPU process, no
+  software-rendering fallback). `src/kami_app_hygaccess_plant/render_demo.cljs`
+  is the entry point (shadow-cljs `:render-demo` build,
+  `public/render-demo.html`); `test/render/verify_render.cljs` (nbb +
+  Playwright, harness ported from `kami-app-amenominaka`'s
+  `test/render/lib/webgpu_harness.cljs`, itself ported from
+  `wasm-webcomponent`'s original `.mjs` harness — ADR-2607078000 Addendum 8 /
+  ADR-2607100100 M2) drives it, asserts `#out` reports `"ok ..."` (no JS/
+  WebGPU exception) with WebGPU actually available, and captures a
+  screenshot. The captured `#out` text
+  (`ok cov=0.000018298324379849743 instances=576`) matches this README's
+  documented golden-test `:mixing-homogeneity-cov-pct` value
+  (`1.8298324379849743E-5`%) bit-for-bit and `576` instances (24×24 mesh) —
+  confirming the browser path really did draw the real solve output, not a
+  stub. The screenshot itself (`test/render/render-screenshot.png`, not
+  committed — regenerate via the commands below) shows the tank's
+  finite-volume cross-section as an isometric diamond of colour-mapped
+  instanced boxes against the sky background, exactly matching
+  `tank-render-ir`'s camera/instance math — real pixels, not a blank canvas.
+  Reproduce locally (inside the west-managed `kotoba-lang` workspace only —
+  see below):
+
+  ```bash
+  npm install && npx playwright install chromium
+  npx shadow-cljs compile render-demo
+  npx nbb -cp test/render test/render/verify_render.cljs
+  # -> {"available":true,"outText":"ok cov=...","ok":true,"screenshotPath":"..."}
+  ```
+
+- **Known, confirmed gap — still not a hard dependency of the base build,
+  and why**: `kotoba-lang/webgpu` is still NOT in this repo's base `:deps`
+  map (only under a new `:cljs` alias — see `deps.edn`). Empirically
+  reconfirmed before deciding this (`clojure -Stree` against a standalone
+  `deps.edn` referencing `io.github.kotoba-lang/webgpu` by git SHA, run
+  again 2026-07-18 to make sure the earlier finding still holds):
 
   ```
   Error building classpath. Local lib io.github.kotoba-lang/expr not found: ~/.gitlibs/libs/io.github.kotoba-lang/webgpu/expr
@@ -144,28 +185,40 @@ mesh-topology and license decisions). Namespace map:
   (`org-w3-webgpu`, `wgsl`, `expr`, `gpu`, `webgl`, `sky`, `render`,
   `render-shaders`, `scene2d`, `dance`, `physics`, `fsm`, `netsync`,
   `pipelines`, `level`, `host`, `playwright`, `cartpole-math`, `sprite-gpu`,
-  `sprite2d`) purely via `:local/root "../X"` — it only resolves when checked
-  out as a sibling inside the west-managed `kotoba-lang` workspace
-  (`orgs/kotoba-lang/*`), which is also true of every actual browser-rendering
-  `kami.webgpu` consumer surveyed while building this repo (no existing
-  `kami-app-*` repo in this org declares `io.github.kotoba-lang/webgpu` as a
-  standalone git dep either — `kami-app-car-sim` / `kami-app-giemon-factory` /
-  `kami-app-sarutahiko-factory` are all explicitly domain-data-only, wgpu
-  rendering not ported). Declaring it here would break `clojure -M:test` for
-  anyone cloning this repo outside that workspace, which is a worse outcome
-  than being honest that the render step is unverified. Inside the
-  `kotoba-lang` west workspace, the actual wiring is:
+  `sprite2d`, plus `host`'s own further `kami-engine-sdk`/`physics-2d`) purely
+  via `:local/root "../X"` — it only resolves when checked out as a sibling
+  inside the west-managed `kotoba-lang` workspace (`orgs/kotoba-lang/*`).
+  This is genuinely true and unavoidable for a standalone clone — but it is
+  **not** a reason to leave the render path unverified, since `west` exists
+  precisely to produce that sibling layout. The fix here is a `:cljs` alias
+  (`deps.edn`) that adds `io.github.kotoba-lang/webgpu {:local/root
+  "../webgpu"}` (plus `:override-deps` for one narrow real conflict found
+  along the way — see the ADR addendum) **only** under that alias, so
+  `clojure -M:test`/`-M:lint` (the base `:deps`) are completely unaffected
+  and still resolve standalone, while `clojure -M:cljs ...` / `shadow-cljs`
+  (which reads deps via `shadow-cljs.edn`'s `:deps {:aliases [:cljs]}`) pulls
+  in the real `kami.webgpu` — already gated on running inside the
+  `kotoba-lang` sibling checkout, the only place any of this resolves at all.
+  The actual wiring (`render_demo.cljs`):
 
   ```clojure
-  (require '[kami.webgpu :as gpu] '[kami-app-hygaccess-plant.render :as render])
-  (-> (gpu/init! canvas)
-      (.then (fn [ctx] (gpu/draw! ctx (render/tank-render-ir result)))))
+  (require '[cae.solver :as solver] '[kami-app-hygaccess-plant.solve]
+           '[kami-app-hygaccess-plant.render :as render] '[kami.webgpu :as webgpu])
+  (let [result (solver/solve {:solver {:kind :hygaccess-mixing-tank}})
+        ir (render/tank-render-ir result)]
+    (-> (webgpu/init! canvas)
+        (.then (fn [ctx] (webgpu/draw! ctx ir)))))
   ```
 
-  See `docs/adr/0001-architecture.md` Decision 4 for the full account.
-- **Do not** read the presence of `render.cljc` as proof of an on-screen
-  visualization — it is proof of a well-formed, deterministic render-IR
-  frame, nothing more.
+  See `docs/adr/0001-architecture.md` Decision 4 (original) and its
+  2026-07-18 addendum for the full account, including the one real
+  dependency-resolution conflict found and fixed (`io.github.kotoba-lang/
+  physics` declared via two incompatible manifest kinds) and confirmation
+  that no change was needed to `kotoba-lang/webgpu` itself.
+- **Do not** read the presence of `render.cljc` alone as proof of an
+  on-screen visualization — read this section, which points at the actual
+  browser proof (`test/render/verify_render.cljs` + the CI `webgpu-smoke`
+  job, `.github/workflows/ci.yml`).
 
 ## Develop
 
@@ -173,4 +226,14 @@ mesh-topology and license decisions). Namespace map:
 clojure -M:test     # 22 tests / 63 assertions (mixing solve determinism + physical
                      # sanity, process/tank domain model, cae.solver dispatch, render-IR)
 clojure -M:lint      # clj-kondo, 0 errors
+```
+
+Real-browser WebGPU render verification (only runs inside the west-managed
+`kotoba-lang` sibling checkout — `orgs/kotoba-lang/*` — see "Render status"
+above):
+
+```bash
+npm install && npx playwright install chromium
+npx shadow-cljs compile render-demo
+npx nbb -cp test/render test/render/verify_render.cljs
 ```

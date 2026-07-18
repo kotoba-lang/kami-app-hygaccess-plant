@@ -139,6 +139,76 @@ working on-screen visualization — see README.md "Render status" for the full,
 honest accounting of what actually has a test proving it versus what does
 not.
 
+## Decision 4 addendum (2026-07-18): real WebGPU rendering verified — this was a workspace-layout gap, not a real bug
+
+Re-investigated Decision 4's "wired but unverified" conclusion on the
+hypothesis that the original standalone-clone test (a lone `kotoba-lang/
+webgpu` checkout with none of its ~20 `:local/root` siblings present) may
+have been testing the wrong thing — this workspace has a purpose-built tool,
+`west`, for checking out an entire interdependent repo group into the
+correct relative sibling layout, and `kotoba-lang/kami-app-amenominaka`
+already proved `kami.webgpu` works from inside that layout for a different
+`kami-app-*` repo. Set up a proper multi-repo workspace
+(`git worktree` outside the superproject + `west init -l manifest` +
+`west update` for `webgpu` and its full sibling set — 21 direct
+`:local/root` deps plus `host`'s own further `kami-engine-sdk`/`physics-2d`,
+24 checkouts total) and re-tested from there. Confirmed **empirically**, not
+assumed:
+
+1. `clojure -Stree` against `kotoba-lang/webgpu`'s own `deps.edn` resolves
+   cleanly with all 21+2 siblings present as flat checkouts under
+   `orgs/kotoba-lang/*` — no `Local lib ... not found` error. The original
+   error was real but was testing an intentionally incomplete environment
+   (webgpu alone, no siblings), not `kotoba-lang/webgpu` itself.
+2. Adding `io.github.kotoba-lang/webgpu {:local/root "../webgpu"}` to this
+   repo's own `deps.edn` (as a NEW `:cljs` alias's `:extra-deps`, not the
+   base `:deps` — see `README.md` "Render status" for why) hit exactly ONE
+   real, narrow conflict: `kami-engine-cae-solver` (pinned `37bbc49`, in the
+   base `:deps`) itself depends on `io.github.kotoba-lang/physics` via a
+   `:git/sha` coordinate, while `kotoba-lang/webgpu` depends on the SAME lib
+   coordinate via `:local/root "../physics"`. `tools.deps` cannot compare a
+   `:local/root` manifest against a `:git/sha` manifest for one coordinate
+   (`Unable to compare versions for io.github.kotoba-lang/physics ...`).
+   Fixed with a one-line `:override-deps {io.github.kotoba-lang/physics
+   {:local/root "../physics"}}` in the `:cljs` alias — resolved entirely
+   inside this repo's own `deps.edn`, no change to `kotoba-lang/webgpu` or
+   `kami-engine-cae-solver` (both shared, high-blast-radius repos) needed or
+   made.
+3. With that one fix, `clojure -Stree -A:cljs` resolves the full classpath
+   cleanly, `npx shadow-cljs compile render-demo` compiles the new
+   `render_demo.cljs` entry point (86 files, only pre-existing
+   `:infer-warning`s inside `kotoba-lang/webgpu` itself, zero errors), and
+   `npx nbb -cp test/render test/render/verify_render.cljs` (the harness
+   ported from `kami-app-amenominaka`) drove a full headless Chromium on
+   macOS to a real WebGPU-drawn frame: `#out` reported `"ok
+   cov=0.000018298324379849743 instances=576"`, and the captured screenshot
+   shows the tank's 24×24 finite-volume cross-section as a real isometric
+   diamond of colour-mapped instanced boxes against the sky background — not
+   a blank canvas. The reported `cov` value matches this repo's own
+   documented golden-test `:mixing-homogeneity-cov-pct`
+   (`1.8298324379849743E-5`%, see README.md "What the golden test observed")
+   bit-for-bit, and `576` instances matches the 24×24 mesh exactly —
+   confirming the browser path drew the REAL solve output end-to-end
+   (`cae.solver/solve :hygaccess-mixing-tank` → `render/tank-render-ir` →
+   `kami.webgpu/init!`+`draw!`), not a stub or fixture.
+4. Verified this did not regress the base build: `clojure -M:test` (22
+   tests / 63 assertions) and `clojure -M:lint` (0 errors) both still pass
+   unchanged, and `clojure -Stree` (no alias) still resolves without
+   touching `../webgpu` at all — the base `:deps` map is untouched;
+   `io.github.kotoba-lang/webgpu` lives only in the new `:cljs` alias.
+
+**Conclusion**: the original "wired but unverified, `kotoba-lang/webgpu`
+cannot be used as a standalone dependency" finding was correct as stated —
+`kotoba-lang/webgpu` genuinely does not resolve from a lone clone — but the
+inference that this therefore meant the render step could not be verified
+at all was a workspace-layout gap in the original investigation, not a
+limitation of `kotoba-lang/webgpu` or a reason to leave the render step
+permanently unverified. Real rendering is now verified end-to-end. No fix
+was needed to `kotoba-lang/webgpu` itself; the only change was this repo's
+own `deps.edn` gaining a `:cljs` alias (base `:deps`/`-M:test`/`-M:lint`
+unaffected) plus the render-demo/harness/CI files described in README.md
+"Render status".
+
 ## Decision 5: effective (turbulent) viscosity, not molecular
 
 A real agitated small-batch tank (0.5 m/s drive, 0.6 m length scale, water's

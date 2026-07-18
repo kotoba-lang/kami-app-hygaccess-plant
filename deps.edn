@@ -3,8 +3,10 @@
  ;; scenario, wired through kami-engine-cae-solver's `cae.solver/solve` multimethod
  ;; contract and driven by nagare's finite-volume incompressible-NS + scalar-transport
  ;; kernel. See README.md "Render status" for why kami.webgpu/kami.gpu (kotoba-lang/webgpu)
- ;; is NOT declared as a :deps git dependency here (confirmed non-standalone-resolvable —
- ;; see docs/adr/0001-architecture.md Decision 4).
+ ;; is NOT declared in the BASE :deps map here (kept standalone-resolvable for
+ ;; `clojure -M:test`/`-M:lint` — see docs/adr/0001-architecture.md Decision 4 /
+ ;; 2026-07-18 addendum). It is added ONLY under the `:cljs` alias below, which is
+ ;; only meaningful inside the west-managed `kotoba-lang` sibling checkout anyway.
  :deps {io.github.kotoba-lang/nagare
         {:git/url "https://github.com/kotoba-lang/nagare.git"
          :git/sha "c51fc7d105d5a4a8b0f64d3c53220b988a5c6a51"}
@@ -20,4 +22,34 @@
   ;; clj-kondo as a Clojars lib (no Homebrew/system install needed).
   :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
          :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"
-                     "--fail-level" "error"]}}}
+                     "--fail-level" "error"]}
+  ;; Render verification only (2026-07-18 addendum to Decision 4).
+  ;; `io.github.kotoba-lang/webgpu` is deliberately kept OUT of the base
+  ;; `:deps` map above so `clojure -M:test`/`-M:lint` keep resolving for
+  ;; anyone cloning this repo standalone. It is declared here instead, as
+  ;; this alias's `:extra-deps`, so it is ONLY resolved when this alias is
+  ;; explicitly requested (`clojure -M:cljs ...` / shadow-cljs, which reads
+  ;; deps via `:deps {:aliases [:cljs]}` in shadow-cljs.edn) — already gated
+  ;; on running inside the west-managed `kotoba-lang` sibling checkout
+  ;; (`orgs/kotoba-lang/*`), the only place `../webgpu` (and its own ~20
+  ;; `:local/root` siblings — org-w3-webgpu/wgsl/expr/sprite-gpu/sprite2d/
+  ;; sky/shaders/render/render-shaders/scene2d/gpu/webgl/dance/physics/fsm/
+  ;; netsync/pipelines/level/host/playwright/cartpole-math, plus host's own
+  ;; kami-engine-sdk/physics-2d) resolve at all. `-M:test`/`-M:lint` are
+  ;; unaffected — they do not activate `:cljs`.
+  ;; :override-deps is needed for a real, narrow conflict discovered while
+  ;; verifying this: kami-engine-cae-solver (pinned 37bbc49, in base :deps)
+  ;; itself now depends on io.github.kotoba-lang/physics via a :git/sha
+  ;; coordinate, while kotoba-lang/webgpu depends on the SAME lib coordinate
+  ;; via :local/root "../physics" — tools.deps cannot compare a :local/root
+  ;; manifest against a :git/sha manifest for the same coordinate
+  ;; ("Unable to compare versions for io.github.kotoba-lang/physics ..."),
+  ;; so resolution fails without an explicit tie-break. Overriding to the
+  ;; sibling checkout is correct here: it's the one every other `:local/root`
+  ;; edge in this alias's graph (webgpu -> physics, webgpu -> host -> physics)
+  ;; already resolves to, so this keeps a single consistent `physics` on the
+  ;; classpath instead of two.
+  :cljs {:extra-paths ["src"]
+         :extra-deps  {thheller/shadow-cljs {:mvn/version "2.28.20"}
+                       io.github.kotoba-lang/webgpu {:local/root "../webgpu"}}
+         :override-deps {io.github.kotoba-lang/physics {:local/root "../physics"}}}}}
