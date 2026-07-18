@@ -1,0 +1,23 @@
+{:paths ["src"]
+ ;; Zero-Rust, portable .cljc. Domain model (tank/process) + the mixing-tank CFD
+ ;; scenario, wired through kami-engine-cae-solver's `cae.solver/solve` multimethod
+ ;; contract and driven by nagare's finite-volume incompressible-NS + scalar-transport
+ ;; kernel. See README.md "Render status" for why kami.webgpu/kami.gpu (kotoba-lang/webgpu)
+ ;; is NOT declared as a :deps git dependency here (confirmed non-standalone-resolvable —
+ ;; see docs/adr/0001-architecture.md Decision 4).
+ :deps {io.github.kotoba-lang/nagare
+        {:git/url "https://github.com/kotoba-lang/nagare.git"
+         :git/sha "c51fc7d105d5a4a8b0f64d3c53220b988a5c6a51"}
+        io.github.kotoba-lang/kami-engine-cae-solver
+        {:git/url "https://github.com/kotoba-lang/kami-engine-cae-solver.git"
+         :git/sha "37bbc496d2e00f3f34b70fa6b8c29f7b02a1ef5c"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test}
+  ;; clj-kondo as a Clojars lib (no Homebrew/system install needed).
+  :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+         :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"
+                     "--fail-level" "error"]}}}
