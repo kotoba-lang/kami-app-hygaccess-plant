@@ -183,6 +183,161 @@
 ;; Orchestration
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Stepwise API — a genuine closed-loop control surface alongside the
+;; monolithic `run-mixing-scenario` below (that entrypoint is UNCHANGED and
+;; still the one CI's render-verification job and mixing_test.cljc's original
+;; golden assertions depend on).
+;;
+;; `run-mixing-scenario` converges the agitation-driven flow field EXACTLY
+;; ONCE (`converge-flow`), then holds the resulting face-flux field `phi`
+;; frozen across all `scalar-steps` transient scalar ticks — a quasi-steady-
+;; flow assumption (the momentum field re-equilibrates fast relative to the
+;; scalar-mixing timescale) that was already implicit in that function, just
+;; never exercised by a changing boundary condition. The stepwise API below
+;; makes that assumption explicit and genuinely closes it: `step` re-solves
+;; PISO — warm-started from the previous flow state, never from rest — ONLY
+;; when the commanded agitator RPM actually changes the drive-velocity
+;; boundary condition from the previous tick's; a held setpoint reuses the
+;; already-converged flow untouched. This is what makes higher RPM show up as
+;; a REAL, recomputed higher face-flux magnitude (stronger convective
+;; stirring => a genuinely different, faster-homogenizing CoV trajectory —
+;; see mixing_test.cljc `higher-rpm-mixes-faster-than-lower-rpm`), and what
+;; makes a CONSTANT-RPM stepwise run numerically reproduce
+;; `run-mixing-scenario`'s own single-converge-then-hold-phi path bit-for-bit
+;; (see mixing_test.cljc `stepwise-with-constant-rpm-matches-monolithic-scenario`).
+;; ---------------------------------------------------------------------------
+
+(defn- reconverge-flow
+  "Re-solve PISO (`nagare.solver/advance`) to the steady flow field for a NEW
+  `new-drive-v-m-s` top-face BC, WARM-STARTED from `prev` (`{:U :p :phi}`)
+  rather than from rest. Warm-starting is not just an optimization here — it
+  is the physically correct behaviour: a real agitated fluid that already has
+  momentum doesn't reset to stationary just because the setpoint moved, it
+  relaxes from wherever it already is. It is also far cheaper than a from-
+  rest `converge-flow` call: only the DELTA between the old and new BC needs
+  to relax, so a setpoint change typically re-converges in a handful of PISO
+  steps rather than the ~300 a from-rest solve needs. `flow-opts` (`:steps`/
+  `:steady-tol`) means the same as `converge-flow`'s."
+  [mesh {:keys [U p phi]} new-drive-v-m-s nu-eff-m2-s
+   {:keys [steps steady-tol] :or {steps 1500 steady-tol 1e-5}}]
+  (let [dx (:dx mesh)
+        dt (* 0.4 (/ dx (max (double new-drive-v-m-s) 1.0e-6)))
+        U' (assoc-in U [:boundary :top :value] [(double new-drive-v-m-s) 0.0])
+        params {:nu nu-eff-m2-s :dt dt :n-correctors 2 :ref-cell 0
+                 :p-tol 1e-7 :u-tol 1e-6 :max-iter 400}
+        st (solver/advance mesh params {:U U' :p p :phi phi}
+                            {:steps steps :steady-tol steady-tol})]
+    {:U (:U st) :p (:p st) :phi (:phi st)
+     :flow-diagnostics {:dt-s dt :steps-run (:steps-run st)
+                         :converged (boolean (:converged st))
+                         :max-courant (diagnostics/max-courant mesh (:phi st) dt)}}))
+
+(defn init-state
+  "Stepwise-API entry point. Same physical scenario as `run-mixing-scenario`
+  (`tank`/`process`/`flow-opts`/`scalar-steps` mean exactly the same thing,
+  including the SAME defaults, and this fn performs the SAME `converge-flow`
+  + `initial-concentration-field` calls that fn's own `let` block does), but
+  returns the INITIAL state for driving the scenario forward tick-by-tick via
+  `step` instead of monolithically.
+
+  Returned state: `{:mesh :tank :process :U :p :phi :nu-eff-m2-s
+  :drive-velocity-m-s :flow-opts :flow-diagnostics :c :gamma :scalar-dt-s
+  :scalar-steps :tick :mixing-homogeneity-cov-pct-history}` — `:tick` starts
+  at 0, `:mixing-homogeneity-cov-pct-history` starts as the just-charged,
+  not-yet-mixed CoV (matching `run-mixing-scenario`'s own history's first
+  entry)."
+  [{:keys [tank process flow-opts scalar-steps]
+    :or {flow-opts {} scalar-steps 40}}]
+  (let [{:keys [mesh U p phi nu-eff-m2-s dt-s steps-run converged max-courant]}
+        (converge-flow tank flow-opts)
+        dilution-ratio (/ (double (:process/stock-feed-concentration-pct process))
+                          (double (:process/target-concentration-pct process)))
+        c0 (initial-concentration-field mesh process dilution-ratio)
+        gamma (:process/turbulent-diffusivity-m2-s process)
+        scalar-dt (/ (double (:process/mixing-duration-s process)) (double scalar-steps))
+        drive-v (tank/agitation-drive-velocity-m-s tank)]
+    {:mesh mesh :tank tank :process process
+     :U U :p p :phi phi
+     :nu-eff-m2-s nu-eff-m2-s :drive-velocity-m-s drive-v
+     :flow-opts flow-opts
+     :flow-diagnostics {:dt-s dt-s :steps-run steps-run :converged converged
+                         :max-courant max-courant}
+     :c c0 :gamma gamma :scalar-dt-s scalar-dt :scalar-steps scalar-steps
+     :tick 0
+     :mixing-homogeneity-cov-pct-history [(coefficient-of-variation-pct (:values c0))]}))
+
+(defn step
+  "Advance a stepwise-API `state` (from `init-state`, or a previous `step`)
+  by ONE control tick, given a `control-command` map
+  `{:agitator-rpm-setpoint <RPM number>}`.
+
+  Converts the RPM setpoint to a drive velocity
+  (`tank/agitator-rpm->drive-velocity-m-s`) and — ONLY IF that velocity
+  differs (beyond floating-point round-trip noise, 1e-9 m/s) from the state's
+  current converged drive velocity — re-solves PISO to the new steady flow
+  field (`reconverge-flow`, warm-started, never from rest) before advecting
+  the concentration field one backward-Euler tick (`transient-scalar-step`)
+  through the (possibly-updated) flow's face-flux field `phi`. A held
+  setpoint reuses the already-converged flow untouched — see ns docstring for
+  why that is both physically correct and what makes a constant-RPM run
+  reproduce `run-mixing-scenario`.
+
+  Returns the updated state (same shape as `init-state`'s return, `:tick`
+  incremented, `:mixing-homogeneity-cov-pct-history` grown by one entry, plus
+  `:control-command` recording what was actually applied this tick)."
+  [{:keys [mesh tank U p phi drive-velocity-m-s nu-eff-m2-s flow-opts
+           c gamma scalar-dt-s tick mixing-homogeneity-cov-pct-history]
+    :as state}
+   {:keys [agitator-rpm-setpoint] :as control-command}]
+  (let [new-drive-v (tank/agitator-rpm->drive-velocity-m-s tank agitator-rpm-setpoint)
+        bc-changed? (> (Math/abs (- new-drive-v (double drive-velocity-m-s))) 1.0e-9)
+        {:keys [U p phi flow-diagnostics]}
+        (if bc-changed?
+          (reconverge-flow mesh {:U U :p p :phi phi} new-drive-v nu-eff-m2-s flow-opts)
+          {:U U :p p :phi phi :flow-diagnostics (:flow-diagnostics state)})
+        c' (transient-scalar-step mesh gamma phi c scalar-dt-s)
+        cov' (coefficient-of-variation-pct (:values c'))]
+    (assoc state
+           :U U :p p :phi phi
+           :drive-velocity-m-s new-drive-v
+           :flow-diagnostics flow-diagnostics
+           :c c'
+           :tick (inc tick)
+           :control-command control-command
+           :mixing-homogeneity-cov-pct-history (conj mixing-homogeneity-cov-pct-history cov')
+           :mixing-homogeneity-cov-pct cov')))
+
+(defn sensor-reading
+  "Extract a plausible sensor-style summary from a stepwise `state`: the
+  current homogeneity CoV, and a FLOW-MAGNITUDE-DERIVED 'temperature proxy'.
+
+  Be honest about what this is: this model has NO energy equation anywhere
+  (no thermal field, no heat source, no thermal BC — `mixing.cljc` solves
+  momentum + scalar-concentration transport only). `:temperature-proxy-c` is
+  NOT a simulated temperature reading; it is a monotonic stand-in derived
+  from the flow field's mean velocity magnitude (representative ambient +
+  viscous/agitation-heating band, documented constants below, not measured or
+  solved for), spelled `-proxy-` rather than `:temperature-c` specifically so
+  a downstream consumer (e.g. `cloud-itonami/cloud-itonami-hygiene-access`'s
+  control-loop reader) can't mistake it for a real thermal simulation result."
+  [{:keys [mesh U mixing-homogeneity-cov-pct-history tick]}]
+  (let [values (:values U)
+        n (count values)
+        mean-speed (/ (reduce + (map (fn [[vx vy]] (Math/sqrt (+ (* vx vx) (* vy vy)))) values))
+                      (double n))
+        ;; Representative mapping only, NOT a solved energy equation: ambient
+        ;; water temperature (20 C) plus up to a few degrees of viscous/
+        ;; agitation heating that scales with flow speed. The 10.0 C-per-(m/s)
+        ;; coefficient is this build's own illustrative choice, documented
+        ;; here (not measured, not derived from a thermal simulation).
+        temperature-proxy-c (+ 20.0 (* 10.0 mean-speed))]
+    {:tick tick
+     :mixing-homogeneity-cov-pct (last mixing-homogeneity-cov-pct-history)
+     :mean-flow-speed-m-s mean-speed
+     :temperature-proxy-c temperature-proxy-c
+     :mesh-n-cells (:n-cells mesh)}))
+
 (defn run-mixing-scenario
   "Run the full scenario: converge the agitation-driven flow, charge the tank
   with a concentration blob sized to the process's dilution ratio, step scalar

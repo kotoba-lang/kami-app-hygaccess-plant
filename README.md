@@ -86,6 +86,52 @@ Running the default scenario (`process/default-tank` + `process/default-process`
   no randomness, no floating-point-order nondeterminism across runs on the
   same platform).
 
+## Stepwise API — a real closed-loop control surface
+
+`mixing.cljc` also exposes a **stepwise API alongside** (not instead of)
+`run-mixing-scenario` above, for callers that need to close a control loop
+around the CFD one tick at a time instead of running the whole scenario
+monolithically — e.g. `cloud-itonami/cloud-itonami-hygiene-access`'s PID +
+ISA-18.2-alarm control loop, which reads a sensor value from each tick's
+state, computes an actuator command, and feeds that command into the NEXT
+tick's boundary condition.
+
+- **`mixing/init-state`** `{:tank :process :flow-opts :scalar-steps}` — same
+  args, same defaults, same `converge-flow` + `initial-concentration-field`
+  calls as `run-mixing-scenario`'s own `let` block. Returns the initial state
+  (mesh, converged flow, concentration field, `:tick 0`).
+- **`mixing/step`** `state control-command -> new-state` — advances ONE
+  control tick. `control-command` is `{:agitator-rpm-setpoint <RPM>}`. This
+  is **not a cosmetic parameter**: the RPM setpoint is converted to a drive
+  velocity via real agitator kinematics (`tank/agitator-rpm->drive-velocity-
+  m-s`, `v = pi * D * N/60`) and, whenever it differs from the previous
+  tick's, PISO is genuinely re-solved (warm-started, never from rest) to a
+  new steady flow field BEFORE that tick's scalar-transport step runs — a
+  higher RPM produces a real, recomputed higher face-flux magnitude, which
+  shows up as a measurably faster-homogenizing CoV trajectory
+  (`mixing_test.cljc`'s `higher-rpm-mixes-faster-than-lower-rpm`, which fails
+  loudly if that wiring is ever accidentally severed). A HELD setpoint reuses
+  the already-converged flow untouched (this model's quasi-steady-flow
+  assumption, made explicit) — which is also what makes a constant-RPM
+  stepwise run reproduce `run-mixing-scenario`'s own numbers exactly (see
+  `mixing_test.cljc`'s `stepwise-with-constant-rpm-matches-monolithic-scenario`
+  — bit-for-bit identical CoV history, not just "close").
+- **`mixing/sensor-reading`** `state -> {:mixing-homogeneity-cov-pct
+  :temperature-proxy-c :mean-flow-speed-m-s ...}` — a plausible sensor-style
+  summary. **`:temperature-proxy-c` is NOT a simulated temperature**: this
+  model has no energy equation anywhere (no thermal field, no heat source, no
+  thermal BC). It is a flow-speed-derived monotonic stand-in, deliberately
+  spelled `-proxy-` rather than `-c`, documented as such right in
+  `mixing.cljc`'s docstring, so a downstream reader can't mistake it for a
+  real thermal simulation result.
+
+This is a **pure software closed loop, entirely inside this repo's own
+digital twin**: there is no physical actuator, no GPIO/serial/Modbus/OPC-UA/
+PLC pathway anywhere in this codebase or its dependents, and none is
+intended. "Closed-loop" here means the boundary condition of the NEXT CFD
+tick is a real function of the PREVIOUS tick's simulated state and a
+computed command — not that anything physical is being driven.
+
 ## Architecture
 
 See `docs/adr/0001-architecture.md` for the full account (including the
@@ -95,7 +141,7 @@ mesh-topology and license decisions). Namespace map:
 |---|---|
 | `kami-app-hygaccess-plant.tank` | Vessel/tank domain model (`:tank/...` keys, mirrors `kami-app-giemon-factory`'s `:factory/...` convention) |
 | `kami-app-hygaccess-plant.process` | Batch/process parameters (`:process/...`), `default-tank` / `default-process` |
-| `kami-app-hygaccess-plant.mixing` | The actual CFD: mesh + BCs -> nagare PISO flow solve -> transient scalar-transport loop -> homogeneity CoV |
+| `kami-app-hygaccess-plant.mixing` | The actual CFD: mesh + BCs -> nagare PISO flow solve -> transient scalar-transport loop -> homogeneity CoV. Also exposes a stepwise `init-state`/`step`/`sensor-reading` API for closed-loop control callers — see "Stepwise API" above. |
 | `kami-app-hygaccess-plant.solve` | Registers `cae.solver/solve :hygaccess-mixing-tank` |
 | `kami-app-hygaccess-plant.render` | render-IR construction (mirrors `kami.webgpu.ir`'s documented contract — see its docstring / Render status below for why it doesn't depend on the Var directly) |
 
@@ -223,8 +269,9 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
 ## Develop
 
 ```bash
-clojure -M:test     # 22 tests / 63 assertions (mixing solve determinism + physical
-                     # sanity, process/tank domain model, cae.solver dispatch, render-IR)
+clojure -M:test     # 28 tests / 89 assertions (mixing solve determinism + physical
+                     # sanity, stepwise API RPM/determinism/monolithic-cross-check,
+                     # process/tank domain model, cae.solver dispatch, render-IR)
 clojure -M:lint      # clj-kondo, 0 errors
 ```
 

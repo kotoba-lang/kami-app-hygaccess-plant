@@ -8,6 +8,7 @@
   mass-conservation defect ~1e-12)."
   (:require [clojure.test :refer [deftest is testing]]
             [kami-app-hygaccess-plant.process :as process]
+            [kami-app-hygaccess-plant.tank :as tank]
             [kami-app-hygaccess-plant.mixing :as mixing]))
 
 (defn- run []
@@ -60,3 +61,109 @@
           (mixing/run-mixing-scenario {:tank tank :process process/default-process :scalar-steps 20})]
       (is (:converged flow))
       (is (< mixing-homogeneity-cov-pct 5.0)))))
+
+;; ---------------------------------------------------------------------------
+;; Stepwise API — a real closed control loop, not a cosmetic parameter.
+;;
+;; Small (10x10) mesh + few ticks for the RPM/determinism tests below (they
+;; don't need golden-test fidelity, just to genuinely exercise the physics);
+;; the monolithic-cross-check test below uses the FULL default 24x24 mesh /
+;; 40-tick scenario on purpose, because it is asserting numerical agreement
+;; with `run-mixing-scenario`'s own already-verified golden numbers.
+;; ---------------------------------------------------------------------------
+
+(def ^:private small-tank
+  (assoc (process/default-tank) :tank/mesh-resolution [10 10]))
+
+(defn- run-constant-rpm
+  "Drive the stepwise API for `n` ticks at a CONSTANT `rpm` setpoint."
+  [rpm n]
+  (loop [k 0 st (mixing/init-state {:tank small-tank :process process/default-process
+                                     :scalar-steps n})]
+    (if (>= k n)
+      st
+      (recur (inc k) (mixing/step st {:agitator-rpm-setpoint rpm})))))
+
+(deftest higher-rpm-mixes-faster-than-lower-rpm
+  (testing "the RPM setpoint genuinely changes the flow field's convective
+           strength, not a cosmetic parameter: a higher agitator RPM must
+           produce a LOWER coefficient-of-variation trajectory than a lower
+           RPM, at every tick, for the SAME number of ticks -- if this ever
+           fails, `:agitator-rpm-setpoint` isn't actually wired into the
+           boundary condition."
+    (let [n 8
+          lo (:mixing-homogeneity-cov-pct-history (run-constant-rpm 15.0 n))
+          hi (:mixing-homogeneity-cov-pct-history (run-constant-rpm 90.0 n))]
+      (is (= (count lo) (count hi) (inc n)))
+      ;; both start from the SAME just-charged initial field/CoV (RPM only
+      ;; takes effect once agitation actually starts, i.e. from tick 1)
+      (is (= (first lo) (first hi)))
+      (testing "every subsequent tick: higher RPM => lower (better-mixed) CoV"
+        (is (every? (fn [[l h]] (< h l)) (map vector (rest lo) (rest hi)))))
+      (testing "the final CoV gap is a real, large physical effect, not noise"
+        (is (< (last hi) (* 0.01 (last lo)))
+            "90 RPM should be at least 100x better-mixed than 15 RPM after the same 8 ticks")))))
+
+(defn- phi->comparable
+  "`phi`'s `:internal`/per-patch values are primitive Java arrays, which
+  Clojure's `=` compares by REFERENCE (two arrays holding identical values
+  are NOT `=`) -- convert to plain vectors first so equality checks below
+  compare actual numbers, not array identity."
+  [phi]
+  {:internal (vec (:internal phi))
+   :patches (into {} (map (fn [[k v]] [k (vec v)]) (:patches phi)))})
+
+(deftest step-is-deterministic-given-same-state-and-command
+  (testing "pure functional stepwise solve: identical (state, command) -> byte-identical new state
+           (compared field-by-field via vectors, since nagare's `phi`/mesh
+           carry primitive Java arrays that `=` treats as reference-equal
+           only -- see `phi->comparable`)"
+    (let [st0 (mixing/init-state {:tank small-tank :process process/default-process :scalar-steps 5})
+          cmd {:agitator-rpm-setpoint 40.0}
+          st1 (mixing/step st0 cmd)
+          st2 (mixing/step st0 cmd)]
+      (is (= (:mixing-homogeneity-cov-pct-history st1) (:mixing-homogeneity-cov-pct-history st2)))
+      (is (= (:mixing-homogeneity-cov-pct st1) (:mixing-homogeneity-cov-pct st2)))
+      (is (= (:values (:c st1)) (:values (:c st2))) "concentration field is byte-identical")
+      (is (= (:values (:U st1)) (:values (:U st2))) "velocity field is byte-identical")
+      (is (= (phi->comparable (:phi st1)) (phi->comparable (:phi st2))) "face-flux field is byte-identical")
+      (is (= (:drive-velocity-m-s st1) (:drive-velocity-m-s st2)))
+      (is (= (:flow-diagnostics st1) (:flow-diagnostics st2))))))
+
+(deftest stepwise-with-constant-rpm-matches-monolithic-scenario
+  (testing "the stepwise refactor is physically consistent with the
+           already-verified monolithic path, not a parallel disconnected
+           implementation: driving `step` 40 times at a CONSTANT RPM equal to
+           the default tank's own implicit agitator drive velocity must
+           reproduce `run-mixing-scenario`'s own golden CoV history."
+    (let [tank (process/default-tank)
+          process process/default-process
+          mono (mixing/run-mixing-scenario {:tank tank :process process})
+          drive-v (tank/agitation-drive-velocity-m-s tank)
+          rpm0 (tank/drive-velocity-m-s->agitator-rpm tank drive-v)
+          final (loop [k 0 st (mixing/init-state {:tank tank :process process :scalar-steps 40})]
+                  (if (>= k 40)
+                    st
+                    (recur (inc k) (mixing/step st {:agitator-rpm-setpoint rpm0}))))]
+      (is (= (:mixing-homogeneity-cov-pct-history final)
+             (:mixing-homogeneity-cov-pct-history mono))
+          "stepwise CoV history must equal the monolithic scenario's own history exactly")
+      (is (< (Math/abs (- (last (:mixing-homogeneity-cov-pct-history final))
+                          (:mixing-homogeneity-cov-pct mono)))
+             1.0e-9)
+          "final CoV agrees with the golden monolithic result within numerical tolerance"))))
+
+(deftest sensor-reading-reports-cov-and-a-clearly-named-temperature-proxy
+  (testing "the honesty requirement: no real thermal simulation exists here,
+           so the field must be named as a proxy, and must actually move with
+           the flow field (not a constant)"
+    (let [st0 (mixing/init-state {:tank small-tank :process process/default-process :scalar-steps 4})
+          r0 (mixing/sensor-reading st0)
+          st1 (mixing/step st0 {:agitator-rpm-setpoint 90.0})
+          r1 (mixing/sensor-reading st1)]
+      (is (contains? r0 :temperature-proxy-c))
+      (is (contains? r0 :mixing-homogeneity-cov-pct))
+      (is (= (:mixing-homogeneity-cov-pct r0) (last (:mixing-homogeneity-cov-pct-history st0))))
+      (is (pos? (:temperature-proxy-c r0)))
+      (is (not= (:mean-flow-speed-m-s r0) (:mean-flow-speed-m-s r1))
+          "the proxy is derived from the actual flow field, not a hardcoded constant"))))

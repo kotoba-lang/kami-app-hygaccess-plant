@@ -267,3 +267,76 @@ has zero dependency on either (it only consumes the plain result map
 `mixing.cljc` produces). Each seam can be tested and reasoned about
 independently, mirroring `nagare`'s own `mesh -> field -> fvm -> linsolve ->
 solver` layering discipline.
+
+## Decision 7 (2026-07-19 addendum): stepwise `init-state`/`step` API for closed-loop control callers
+
+Added `mixing/init-state`, `mixing/step`, and `mixing/sensor-reading`
+alongside (not replacing) `run-mixing-scenario`, for `cloud-itonami/
+cloud-itonami-hygiene-access`'s real PID + ISA-18.2-alarm closed control
+loop (that repo reads a sensor value from each tick, computes an actuator
+command, and needs the NEXT tick's boundary condition to genuinely reflect
+it — a monolithic "run the whole thing, get one final number" entrypoint
+cannot do that).
+
+**The design question this decision actually answers**: `run-mixing-scenario`
+converges the agitation-driven flow field EXACTLY ONCE, then holds the
+resulting face-flux `phi` frozen across all 40 scalar-transport ticks — a
+quasi-steady-flow assumption. For a genuine per-tick RPM setpoint to mean
+anything physically, `step` has to decide what to do with that frozen-flow
+assumption when the setpoint actually changes mid-run.
+
+**Decision: re-solve PISO, warm-started, only when the commanded drive
+velocity actually changes.** `step` converts the RPM setpoint to a drive
+velocity via real agitator kinematics (`tank/agitator-rpm->drive-velocity-
+m-s`, `v = pi * D * N/60` — NOT an arbitrary scale factor; see `tank.cljc`).
+If that velocity differs from the previous tick's (beyond floating-point
+round-trip noise), `mixing.cljc`'s private `reconverge-flow` re-runs
+`nagare.solver/advance` — WARM-STARTED from the previous `{:U :p :phi}`,
+never from rest — to the new steady flow field before that tick's
+`transient-scalar-step` runs. A held setpoint reuses the already-converged
+flow untouched.
+
+Two things this buys, both empirically verified (not asserted):
+
+1. **Real physics, not a cosmetic parameter.** A higher commanded RPM
+   produces a genuinely recomputed higher face-flux magnitude, which shows
+   up as a measurably faster-homogenizing CoV trajectory — `mixing_test.cljc`
+   `higher-rpm-mixes-faster-than-lower-rpm` asserts strict CoV dominance at
+   every tick between a 90 RPM and a 15 RPM run from the same initial state,
+   and that the 90 RPM run ends up at least 100x better-mixed after the same
+   number of ticks. If the RPM setpoint were ever accidentally left
+   unwired from the boundary condition, this test fails loudly instead of
+   silently passing on a cosmetic no-op parameter.
+2. **Physical consistency with the already-verified monolithic path.**
+   Because a HELD setpoint skips the re-solve entirely, driving `step` 40
+   times at a CONSTANT RPM equal to the default tank's own implicit
+   agitation-drive velocity reproduces `run-mixing-scenario`'s own
+   `:mixing-homogeneity-cov-pct-history` **bit-for-bit** (`mixing_test.cljc`
+   `stepwise-with-constant-rpm-matches-monolithic-scenario` — measured
+   `diff = 0.0` while authoring this, not just "within tolerance"). The
+   stepwise refactor is therefore not a parallel, disconnected
+   reimplementation; a constant-command stepwise run IS the monolithic run,
+   by construction.
+
+Warm-starting (rather than a from-rest `converge-flow` call on every
+setpoint change) is not only a performance choice — it is the physically
+correct behaviour: a real agitated fluid that already has momentum doesn't
+reset to stationary just because the setpoint moved, it relaxes from
+wherever it already is. It also keeps a per-tick RPM change cheap: only the
+delta between the old and new boundary condition needs to relax (a handful
+of PISO steps, empirically), not the ~300 steps a from-rest solve needs —
+measured while authoring this: an 8-tick stepwise run on a 10x10 mesh at two
+different constant RPMs (15 and 90) completed in under 1 second combined.
+
+`sensor-reading`'s `:temperature-proxy-c` is explicitly NOT a simulated
+temperature — this model has no energy equation anywhere. It is a
+flow-speed-derived monotonic stand-in for a real thermal sensor reading in
+the control-loop repo, spelled `-proxy-` (not `-c`) specifically so a
+downstream reader cannot mistake it for a resolved thermal simulation, per
+this repo's existing honesty discipline (see README.md "Where the numbers
+come from").
+
+No physical actuation pathway exists anywhere in this codebase or is
+intended: "closed-loop" here means the next CFD tick's boundary condition is
+a real function of the previous tick's simulated state and a computed
+command, entirely inside this repo's own digital twin.

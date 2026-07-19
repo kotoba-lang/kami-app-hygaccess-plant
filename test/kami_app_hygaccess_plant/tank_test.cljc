@@ -1,5 +1,5 @@
 (ns kami-app-hygaccess-plant.tank-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [kami-app-hygaccess-plant.tank :as tank]))
 
 (def sample
@@ -18,3 +18,25 @@
 (deftest agitation-drive-velocity-reads-tank-data-with-a-fallback
   (is (= 0.5 (tank/agitation-drive-velocity-m-s sample)))
   (is (= 0.5 (tank/agitation-drive-velocity-m-s (dissoc sample :tank/agitation)))))
+
+(deftest agitator-rpm-converts-to-drive-velocity-via-real-kinematics
+  (testing "v = pi * D * N/60, default D = 0.20 m"
+    (is (< (Math/abs (- (tank/agitator-rpm->drive-velocity-m-s sample 60.0)
+                        (* Math/PI 0.20)))
+           1.0e-12))
+    (is (= 0.0 (tank/agitator-rpm->drive-velocity-m-s sample 0.0)))
+    (testing "doubling RPM doubles the drive velocity (linear kinematics, not a lookup table)"
+      (is (< (Math/abs (- (* 2.0 (tank/agitator-rpm->drive-velocity-m-s sample 30.0))
+                          (tank/agitator-rpm->drive-velocity-m-s sample 60.0)))
+             1.0e-12)))
+    (testing "a wider impeller gives a higher tip speed at the same RPM"
+      (let [wide (assoc-in sample [:tank/agitation :agitation/impeller-diameter-m] 0.40)]
+        (is (> (tank/agitator-rpm->drive-velocity-m-s wide 60.0)
+               (tank/agitator-rpm->drive-velocity-m-s sample 60.0)))))))
+
+(deftest drive-velocity-to-rpm-is-the-inverse-conversion
+  (testing "round-trips agitator-rpm->drive-velocity-m-s to within floating-point noise"
+    (doseq [rpm [0.0 12.5 47.7464829275686 200.0]]
+      (let [v (tank/agitator-rpm->drive-velocity-m-s sample rpm)
+            rpm' (tank/drive-velocity-m-s->agitator-rpm sample v)]
+        (is (< (Math/abs (- rpm rpm')) 1.0e-9))))))
