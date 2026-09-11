@@ -178,7 +178,7 @@ assumed:
    cleanly, `npx shadow-cljs compile render-demo` compiles the new
    `render_demo.cljs` entry point (86 files, only pre-existing
    `:infer-warning`s inside `kotoba-lang/webgpu` itself, zero errors), and
-   `npx nbb -cp test/render test/render/verify_render.cljs` (the harness
+   `npx nbb -cp test/render test/render/verify_render.cljk` (the harness
    ported from `kami-app-amenominaka`) drove a full headless Chromium on
    macOS to a real WebGPU-drawn frame: `#out` reported `"ok
    cov=0.000018298324379849743 instances=576"`, and the captured screenshot

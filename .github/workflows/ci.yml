@@ -132,7 +132,7 @@ jobs:
         working-directory: kami-app-hygaccess-plant
       - run: npx shadow-cljs compile render-demo
         working-directory: kami-app-hygaccess-plant
-      - run: npx nbb -cp test/render test/render/verify_render.cljs
+      - run: npx nbb -cp test/render test/render/verify_render.cljk
         working-directory: kami-app-hygaccess-plant
 
       - uses: actions/upload-artifact@v4
