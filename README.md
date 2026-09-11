@@ -211,15 +211,15 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
 
   ```bash
   npm install && npx playwright install chromium
-  npx shadow-cljs compile render-demo
-  npx nbb -cp test/render test/render/verify_render.cljk
+  amu compile --target wasm32-browser render-demo
+  kbb --backend sci -cp test/render test/render/verify_render.cljk
   # -> {"available":true,"outText":"ok cov=...","ok":true,"screenshotPath":"..."}
   ```
 
 - **Known, confirmed gap — still not a hard dependency of the base build,
   and why**: `kotoba-lang/webgpu` is still NOT in this repo's base `:deps`
   map (only under a new `:cljs` alias — see `deps.edn`). Empirically
-  reconfirmed before deciding this (`clojure -Stree` against a standalone
+  reconfirmed before deciding this (`kbb -Stree` against a standalone
   `deps.edn` referencing `io.github.kotoba-lang/webgpu` by git SHA, run
   again 2026-07-18 to make sure the earlier finding still holds):
 
@@ -240,8 +240,8 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
   (`deps.edn`) that adds `io.github.kotoba-lang/webgpu {:local/root
   "../webgpu"}` (plus `:override-deps` for one narrow real conflict found
   along the way — see the ADR addendum) **only** under that alias, so
-  `clojure -M:test`/`-M:lint` (the base `:deps`) are completely unaffected
-  and still resolve standalone, while `clojure -M:cljs ...` / `shadow-cljs`
+  `kbb -M:test`/`-M:lint` (the base `:deps`) are completely unaffected
+  and still resolve standalone, while `kbb -M:cljs ...` / `shadow-cljs`
   (which reads deps via `shadow-cljs.edn`'s `:deps {:aliases [:cljs]}`) pulls
   in the real `kami.webgpu` — already gated on running inside the
   `kotoba-lang` sibling checkout, the only place any of this resolves at all.
@@ -269,10 +269,10 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
 ## Develop
 
 ```bash
-clojure -M:test     # 28 tests / 89 assertions (mixing solve determinism + physical
+kbb -M:test     # 28 tests / 89 assertions (mixing solve determinism + physical
                      # sanity, stepwise API RPM/determinism/monolithic-cross-check,
                      # process/tank domain model, cae.solver dispatch, render-IR)
-clojure -M:lint      # clj-kondo, 0 errors
+kbb -M:lint      # clj-kondo, 0 errors
 ```
 
 Real-browser WebGPU render verification (only runs inside the west-managed
@@ -281,6 +281,6 @@ above):
 
 ```bash
 npm install && npx playwright install chromium
-npx shadow-cljs compile render-demo
-npx nbb -cp test/render test/render/verify_render.cljk
+amu compile --target wasm32-browser render-demo
+kbb --backend sci -cp test/render test/render/verify_render.cljk
 ```

@@ -14,7 +14,7 @@
   via `:local/root \"../X\"`, which only resolves when this repo is checked out
   as a sibling inside the west-managed `kotoba-lang` workspace
   (`orgs/kotoba-lang/*`) alongside all of those. Confirmed empirically
-  (`clojure -Stree` against a standalone deps.edn referencing
+  (`kbb -Stree` against a standalone deps.edn referencing
   `io.github.kotoba-lang/webgpu` by git SHA): `Error building classpath. Local
   lib io.github.kotoba-lang/expr not found`. See docs/adr/0001-architecture.md
   Decision 4 and README.md 'Render status' for the full account, including how

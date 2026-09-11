@@ -2,7 +2,7 @@
 ;; WebGPU render verification. `:deps {:aliases [:cljs]}` tells shadow-cljs
 ;; to resolve its Clojure classpath through deps.edn's `:cljs` alias, which
 ;; is where `io.github.kotoba-lang/webgpu` lives (kept out of the base
-;; `:deps` map so `clojure -M:test`/`-M:lint` stay standalone-resolvable).
+;; `:deps` map so `kbb -M:test`/`-M:lint` stay standalone-resolvable).
 {:deps  {:aliases [:cljs]}
  :builds
  {:render-demo

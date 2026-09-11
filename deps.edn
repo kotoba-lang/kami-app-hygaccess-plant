@@ -4,7 +4,7 @@
  ;; contract and driven by nagare's finite-volume incompressible-NS + scalar-transport
  ;; kernel. See README.md "Render status" for why kami.webgpu/kami.gpu (kotoba-lang/webgpu)
  ;; is NOT declared in the BASE :deps map here (kept standalone-resolvable for
- ;; `clojure -M:test`/`-M:lint` — see docs/adr/0001-architecture.md Decision 4 /
+ ;; `kbb -M:test`/`-M:lint` — see docs/adr/0001-architecture.md Decision 4 /
  ;; 2026-07-18 addendum). It is added ONLY under the `:cljs` alias below, which is
  ;; only meaningful inside the west-managed `kotoba-lang` sibling checkout anyway.
  :deps {io.github.kotoba-lang/nagare
@@ -25,10 +25,10 @@
                      "--fail-level" "error"]}
   ;; Render verification only (2026-07-18 addendum to Decision 4).
   ;; `io.github.kotoba-lang/webgpu` is deliberately kept OUT of the base
-  ;; `:deps` map above so `clojure -M:test`/`-M:lint` keep resolving for
+  ;; `:deps` map above so `kbb -M:test`/`-M:lint` keep resolving for
   ;; anyone cloning this repo standalone. It is declared here instead, as
   ;; this alias's `:extra-deps`, so it is ONLY resolved when this alias is
-  ;; explicitly requested (`clojure -M:cljs ...` / shadow-cljs, which reads
+  ;; explicitly requested (`kbb -M:cljs ...` / shadow-cljs, which reads
   ;; deps via `:deps {:aliases [:cljs]}` in shadow-cljs.edn) — already gated
   ;; on running inside the west-managed `kotoba-lang` sibling checkout
   ;; (`orgs/kotoba-lang/*`), the only place `../webgpu` (and its own ~20
