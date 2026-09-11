@@ -111,7 +111,7 @@ $ cat deps.edn
  :deps {io.github.kotoba-lang/webgpu
         {:git/url "https://github.com/kotoba-lang/webgpu.git"
          :git/sha "247ae4b585dfa911693e9f258b703bf735045480"}}}
-$ clojure -Stree
+$ kbb -Stree
 Cloning: https://github.com/kotoba-lang/webgpu.git
 Checking out: https://github.com/kotoba-lang/webgpu.git at 247ae4b...
 Error building classpath. Local lib io.github.kotoba-lang/expr not found:
@@ -155,7 +155,7 @@ already proved `kami.webgpu` works from inside that layout for a different
 24 checkouts total) and re-tested from there. Confirmed **empirically**, not
 assumed:
 
-1. `clojure -Stree` against `kotoba-lang/webgpu`'s own `deps.edn` resolves
+1. `kbb -Stree` against `kotoba-lang/webgpu`'s own `deps.edn` resolves
    cleanly with all 21+2 siblings present as flat checkouts under
    `orgs/kotoba-lang/*` — no `Local lib ... not found` error. The original
    error was real but was testing an intentionally incomplete environment
@@ -174,11 +174,11 @@ assumed:
    inside this repo's own `deps.edn`, no change to `kotoba-lang/webgpu` or
    `kami-engine-cae-solver` (both shared, high-blast-radius repos) needed or
    made.
-3. With that one fix, `clojure -Stree -A:cljs` resolves the full classpath
-   cleanly, `npx shadow-cljs compile render-demo` compiles the new
+3. With that one fix, `kbb -Stree -A:cljs` resolves the full classpath
+   cleanly, `amu compile --target wasm32-browser render-demo` compiles the new
    `render_demo.cljs` entry point (86 files, only pre-existing
    `:infer-warning`s inside `kotoba-lang/webgpu` itself, zero errors), and
-   `npx nbb -cp test/render test/render/verify_render.cljk` (the harness
+   `kbb --backend sci -cp test/render test/render/verify_render.cljk` (the harness
    ported from `kami-app-amenominaka`) drove a full headless Chromium on
    macOS to a real WebGPU-drawn frame: `#out` reported `"ok
    cov=0.000018298324379849743 instances=576"`, and the captured screenshot
@@ -191,9 +191,9 @@ assumed:
    confirming the browser path drew the REAL solve output end-to-end
    (`cae.solver/solve :hygaccess-mixing-tank` → `render/tank-render-ir` →
    `kami.webgpu/init!`+`draw!`), not a stub or fixture.
-4. Verified this did not regress the base build: `clojure -M:test` (22
-   tests / 63 assertions) and `clojure -M:lint` (0 errors) both still pass
-   unchanged, and `clojure -Stree` (no alias) still resolves without
+4. Verified this did not regress the base build: `kbb -M:test` (22
+   tests / 63 assertions) and `kbb -M:lint` (0 errors) both still pass
+   unchanged, and `kbb -Stree` (no alias) still resolves without
    touching `../webgpu` at all — the base `:deps` map is untouched;
    `io.github.kotoba-lang/webgpu` lives only in the new `:cljs` alias.
 
