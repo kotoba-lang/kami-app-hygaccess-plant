@@ -6,7 +6,7 @@
   var, so this sidesteps a false \"Unresolved symbol\" lint error rather than
   suppressing it):
 
-    nbb -cp test/render test/render/verify_render.cljs
+    nbb -cp test/render test/render/verify_render.cljk
 
   Loads the shadow-cljs-compiled `public/render-demo.html`
   (kami-app-hygaccess-plant.render-demo/init! — runs the real

@@ -4,7 +4,7 @@
   harnesses are written in nbb, not `.mjs`/`.cjs`).
 
   Ported verbatim (same technique, same findings) from
-  `kotoba-lang/kami-app-amenominaka`'s `test/render/lib/webgpu_harness.cljs`
+  `kotoba-lang/kami-app-amenominaka`'s `test/render/lib/webgpu_harness.cljk`
   (ADR-2607100100 M2), which itself ported the technique proven in
   `kotoba-lang/wasm-webcomponent`'s `test/render/lib/webgpu-harness.mjs`
   (ADR-2607078000 Addendum 8):

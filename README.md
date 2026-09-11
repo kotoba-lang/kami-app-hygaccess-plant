@@ -188,11 +188,11 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
   drawing this repo's real render-IR — not a fixture, the **exact same**
   `cae.solver/solve :hygaccess-mixing-tank` result the JVM tests exercise —
   in a full headless Chromium on macOS (real Metal-backed GPU process, no
-  software-rendering fallback). `src/kami_app_hygaccess_plant/render_demo.cljs`
+  software-rendering fallback). `src/kami_app_hygaccess_plant/render_demo.cljk`
   is the entry point (shadow-cljs `:render-demo` build,
-  `public/render-demo.html`); `test/render/verify_render.cljs` (nbb +
+  `public/render-demo.html`); `test/render/verify_render.cljk` (nbb +
   Playwright, harness ported from `kami-app-amenominaka`'s
-  `test/render/lib/webgpu_harness.cljs`, itself ported from
+  `test/render/lib/webgpu_harness.cljk`, itself ported from
   `wasm-webcomponent`'s original `.mjs` harness — ADR-2607078000 Addendum 8 /
   ADR-2607100100 M2) drives it, asserts `#out` reports `"ok ..."` (no JS/
   WebGPU exception) with WebGPU actually available, and captures a
@@ -212,7 +212,7 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
   ```bash
   npm install && npx playwright install chromium
   npx shadow-cljs compile render-demo
-  npx nbb -cp test/render test/render/verify_render.cljs
+  npx nbb -cp test/render test/render/verify_render.cljk
   # -> {"available":true,"outText":"ok cov=...","ok":true,"screenshotPath":"..."}
   ```
 
@@ -263,7 +263,7 @@ precedent for a `kami-app-*` repo actually calling `kami.webgpu`.
   that no change was needed to `kotoba-lang/webgpu` itself.
 - **Do not** read the presence of `render.cljc` alone as proof of an
   on-screen visualization — read this section, which points at the actual
-  browser proof (`test/render/verify_render.cljs` + the CI `webgpu-smoke`
+  browser proof (`test/render/verify_render.cljk` + the CI `webgpu-smoke`
   job, `.github/workflows/ci.yml`).
 
 ## Develop
@@ -282,5 +282,5 @@ above):
 ```bash
 npm install && npx playwright install chromium
 npx shadow-cljs compile render-demo
-npx nbb -cp test/render test/render/verify_render.cljs
+npx nbb -cp test/render test/render/verify_render.cljk
 ```

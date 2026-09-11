@@ -13,7 +13,7 @@
   `:cljs` alias.
 
   Writes 'ok' / 'error: ...' to `#out` for
-  `test/render/verify_render.cljs`'s Playwright harness to read, mirroring
+  `test/render/verify_render.cljk`'s Playwright harness to read, mirroring
   the pattern established in `kotoba-lang/kami-app-amenominaka`'s
   `render_demo.cljs` (ADR-2607100100 M2)."
   (:require [cae.solver :as solver]
