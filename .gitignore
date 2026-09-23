@@ -12,3 +12,4 @@
 /package-lock.json
 /public/js/
 /test/render/render-screenshot.png
+.nbb/

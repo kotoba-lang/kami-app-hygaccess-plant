@@ -6,7 +6,7 @@
   actual numbers observed: flow converges in 318 PISO steps at max Courant
   ~0.35, CoV falls from ~332% to ~1.8e-5% over 40 scalar-transport ticks,
   mass-conservation defect ~1e-12)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kami-app-hygaccess-plant.process :as process]
             [kami-app-hygaccess-plant.tank :as tank]
             [kami-app-hygaccess-plant.mixing :as mixing]))

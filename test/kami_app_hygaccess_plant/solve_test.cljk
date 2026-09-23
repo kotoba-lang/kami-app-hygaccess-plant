@@ -3,7 +3,7 @@
   `cae.solver/solve` dispatch contract (kami-engine-cae-solver), the same way
   every other CAE domain in that repo is invoked — not just as a direct
   function call into `mixing.cljc`."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [cae.solver :as solver]
             [kami-app-hygaccess-plant.solve]
             [kami-app-hygaccess-plant.mixing :as mixing]
