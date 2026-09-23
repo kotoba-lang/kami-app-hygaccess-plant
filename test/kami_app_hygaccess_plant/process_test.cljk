@@ -3,7 +3,7 @@
   and README.md 'Where the numbers come from') so a future edit that silently
   drifts the target/efficacy-window numbers away from
   cloud-itonami-hygiene-access's own registered data fails loudly."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kami-app-hygaccess-plant.process :as process]
             [kami-app-hygaccess-plant.tank :as tank]))
 

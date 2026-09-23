@@ -3,7 +3,7 @@
   context) — this is the 'wired' half of Step 3's 'wired-but-unverified': we
   can prove the EDN render-IR is well-formed and deterministic, but not that a
   browser actually draws it (see README.md 'Render status')."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kami-app-hygaccess-plant.process :as process]
             [kami-app-hygaccess-plant.mixing :as mixing]
             [kami-app-hygaccess-plant.render :as render]))
