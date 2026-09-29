@@ -1,6 +1,6 @@
 (ns lib.webgpu-harness
   "Real-browser WebGPU verification harness, run via nbb (ClojureScript-on-
-  Node) — not hand-written JS (CLAUDE.md: Node-side verification/test
+  Node) — not hand-written JS (AGENTS.md: Node-side verification/test
   harnesses are written in nbb, not `.mjs`/`.cjs`).
 
   Ported verbatim (same technique, same findings) from
